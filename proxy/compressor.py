@@ -97,8 +97,8 @@ class RollingCompressor:
 
     def _find_keep_index(self, messages: list) -> int:
         """Walk backwards from end, keeping messages until we hit target_tokens.
-        Snaps to user message boundaries so we don't split turns.
-        Always keeps at least the last 4 messages (2 exchanges)."""
+        Snaps to user message boundaries, ensuring tool_use/tool_result pairs
+        are never split. Always keeps at least the last 4 messages."""
         if len(messages) <= 4:
             return 0
         max_idx = len(messages) - 4  # Never return higher than this
@@ -106,15 +106,26 @@ class RollingCompressor:
         for i in range(len(messages) - 1, -1, -1):
             msg_tokens = self.estimate_tokens([messages[i]])
             if accumulated + msg_tokens > self.target_tokens:
-                # Find the next user message boundary
-                idx = i + 1
+                # Find a safe boundary: a user message that doesn't start
+                # with a tool_result (which would need the preceding tool_use)
                 for j in range(i + 1, len(messages)):
                     if messages[j].get("role") == "user":
-                        idx = j
-                        break
-                return min(idx, max_idx)
+                        if not self._has_tool_result(messages[j]):
+                            return min(j, max_idx)
+                        # This user message has tool_result — skip it,
+                        # keep looking for a clean boundary
+                return min(i + 1, max_idx)
             accumulated += msg_tokens
         return 0
+
+    def _has_tool_result(self, message: dict) -> bool:
+        """Check if a message contains tool_result blocks."""
+        content = message.get("content", "")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    return True
+        return False
 
     def _has_summary(self, messages: list) -> bool:
         if not messages:

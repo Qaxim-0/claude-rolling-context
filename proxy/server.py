@@ -103,6 +103,30 @@ def get_passthrough_headers(request: web.Request) -> dict:
     return headers
 
 
+def _validate_tool_pairs(messages: list) -> list:
+    """Ensure all tool_result blocks have matching tool_use blocks in
+    preceding messages. Drops orphaned messages from the start."""
+    # Build set of tool_use IDs as we scan forward
+    tool_use_ids = set()
+    valid_from = 0
+
+    for i, msg in enumerate(messages):
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "tool_use":
+                        tool_use_ids.add(block.get("id", ""))
+                    elif block.get("type") == "tool_result":
+                        if block.get("tool_use_id", "") not in tool_use_ids:
+                            # Orphaned tool_result — skip up to and including this message
+                            valid_from = i + 1
+
+    if valid_from > 0:
+        log.info(f"Dropping {valid_from} messages with orphaned tool_result references")
+    return messages[valid_from:]
+
+
 async def _do_background_compression(session_state: dict, messages: list, msg_count: int, auth_headers: dict):
     """Run compression in background. Stores result in session state."""
     try:
@@ -220,9 +244,20 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
         # Append any messages that arrived after compression was triggered
         new_messages = messages[original_count:] if original_count < len(messages) else []
         merged = compressed + new_messages
+        # Validate tool_use/tool_result pairs — compression may have
+        # removed a tool_use that a kept tool_result references
+        merged = _validate_tool_pairs(merged)
         merged_tokens = compressor.estimate_tokens(merged)
 
         if merged_tokens < token_count:
+            # Strip cache_control from all messages — cache breakpoints are
+            # invalid after restructuring and API limits to 4 blocks max
+            for msg in merged:
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict):
+                            block.pop("cache_control", None)
             log.info(
                 f"Applying compression: ~{token_count:,} -> ~{merged_tokens:,} tokens "
                 f"({len(messages)} -> {len(merged)} messages, "
