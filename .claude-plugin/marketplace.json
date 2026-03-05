@@ -3,8 +3,7 @@
   "name": "rolling-context-marketplace",
   "description": "Rolling context compression for Claude Code — automatic background summarization of old messages while keeping recent context verbatim",
   "owner": {
-    "name": "NodeNestor",
-    "email": "nodenester@gmail.com"
+    "name": "NodeNestor"
   },
   "plugins": [
     {
