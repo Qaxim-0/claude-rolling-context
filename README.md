@@ -19,8 +19,8 @@ Claude Code  ──►  Rolling Context Proxy (:5588)  ──►  Anthropic API
 
 Instead of Claude Code's built-in `/compact` (which replaces **everything** with a lossy summary), this plugin:
 
-1. **Keeps recent messages untouched** — ~40K tokens of recent context stays verbatim
-2. **Only compresses when needed** — triggers at 80K, compresses down to ~45K, grows naturally until next trigger
+1. **Keeps recent messages untouched** — recent context stays verbatim
+2. **Only compresses when needed** — triggers at 80K (real API token count), compresses old messages, grows naturally until next trigger
 3. **Merges summaries** — each compression cycle merges with the previous summary, building a rolling timeline
 4. **Never blocks** — compression runs in the background, applied on the next request
 5. **Full transcripts preserved** — Claude Code still saves everything to JSONL in `~/.claude/projects/`
@@ -92,14 +92,14 @@ BEFORE (hit 80K trigger):
   [msg1] [msg2] [msg3] ... [msg60] [msg61] ... [msg100]
   |<——————————————— ~85K tokens ———————————————>|
 
-AFTER (compressed to ~45K):
+AFTER (compressed):
   [rolling summary] [ack] [msg61] ... [msg100]
-  |<— ~5K summary —>|    |<—— ~40K verbatim ——>|
+  |<— ~5K summary —>|    |<—— verbatim ————————>|
 
 NEXT CYCLE (grows back to 80K, triggers again):
   [rolling summary] [ack] [msg61] ... [msg140]
-  |<——————————————— ~82K tokens ———————————————>|
-  → merges old summary + msg61-msg100 into new summary
+  |<——————————————— ~85K tokens ———————————————>|
+  → new summary merges old summary + msg61-msg100
   → keeps msg101-msg140 verbatim
 ```
 
