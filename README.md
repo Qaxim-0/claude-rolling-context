@@ -27,7 +27,18 @@ Instead of Claude Code's built-in `/compact` (which replaces **everything** with
 
 ## Install
 
-### Option 1: One-line install (recommended)
+### Option 1: Claude Code Plugin (recommended)
+
+Run these two commands inside Claude Code:
+
+```
+/plugin marketplace add https://github.com/NodeNestor/claude-rolling-context
+/plugin install rolling-context
+```
+
+Restart your terminal. On the next session, the plugin auto-starts the proxy and configures `ANTHROPIC_BASE_URL` for you. That's it.
+
+### Option 2: Manual install
 
 **Linux / macOS:**
 ```bash
@@ -43,35 +54,7 @@ cd $HOME\claude-rolling-context
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-The installer:
-- Sets up a Python venv with dependencies (just `aiohttp`)
-- Configures `ANTHROPIC_BASE_URL` to route through the proxy
-- Registers as a Claude Code plugin (auto-starts proxy on session start)
-
-Restart your terminal and you're done. The proxy starts automatically when Claude Code launches.
-
-### Option 2: Claude Code Plugin Marketplace
-
-You can also add this repo as a plugin marketplace directly in Claude Code:
-
-```
-/plugin marketplace add https://github.com/NodeNestor/claude-rolling-context
-/plugin install rolling-context
-```
-
-Then set the environment variable so Claude Code routes through the proxy:
-
-**Linux / macOS** — add to your `~/.bashrc` or `~/.zshrc`:
-```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:5588
-```
-
-**Windows (PowerShell):**
-```powershell
-[Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", "http://127.0.0.1:5588", "User")
-```
-
-Restart your terminal. The proxy auto-starts on each Claude Code session via the plugin hook.
+The installer sets up a Python venv, configures `ANTHROPIC_BASE_URL`, and registers the plugin. Restart your terminal and you're done.
 
 ## Configuration
 
