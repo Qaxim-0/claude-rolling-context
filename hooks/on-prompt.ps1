@@ -1,5 +1,5 @@
 # Ensure rolling context proxy is running (Windows)
-# Runs on SessionStart — must be fast, non-blocking
+# Pure stdlib — no venv needed, just python
 
 $ErrorActionPreference = "SilentlyContinue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -16,8 +16,7 @@ function Log($msg) {
     Add-Content -Path $HookLog -Value "[$ts] $msg"
 }
 
-Log "Hook started. ScriptDir=$ScriptDir ProxyDir=$ProxyDir"
-Log "CLAUDE_PLUGIN_ROOT=$($env:CLAUDE_PLUGIN_ROOT)"
+Log "Hook started. ProxyDir=$ProxyDir"
 
 # Fast check: is proxy already running?
 if (Test-Path $PidFile) {
@@ -28,7 +27,6 @@ if (Test-Path $PidFile) {
             Log "Proxy already running (PID $savedPid)"
             exit 0
         }
-        Log "Stale PID file (PID $savedPid not running), removing"
     }
     Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
 }
@@ -37,57 +35,22 @@ if (Test-Path $PidFile) {
 $currentUrl = [Environment]::GetEnvironmentVariable("ANTHROPIC_BASE_URL", "User")
 if (-not $currentUrl) {
     [Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", $ProxyUrl, "User")
-    Log "Set ANTHROPIC_BASE_URL=$ProxyUrl (user env var)"
+    Log "Set ANTHROPIC_BASE_URL=$ProxyUrl"
 } elseif ($currentUrl -notmatch "127\.0\.0\.1.*$Port") {
     [Environment]::SetEnvironmentVariable("ROLLING_CONTEXT_UPSTREAM", $currentUrl, "User")
     [Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", $ProxyUrl, "User")
-    Log "Chaining: upstream=$currentUrl, ANTHROPIC_BASE_URL=$ProxyUrl"
+    Log "Chaining: upstream=$currentUrl"
 } else {
-    Log "ANTHROPIC_BASE_URL already set to $currentUrl"
+    Log "ANTHROPIC_BASE_URL already set"
 }
 
-# Check if venv exists
-$VenvPython = Join-Path $ProxyDir "venv\Scripts\python.exe"
-if (Test-Path $VenvPython) {
-    Log "Venv exists at $VenvPython"
-} else {
-    Log "Venv NOT found, will create"
-}
-
-# Start proxy in background — DO NOT WAIT
-$setupScript = @"
-`$logFile = '$HookLog'
-function Log(`$msg) {
-    `$ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    Add-Content -Path `$logFile -Value "[`$ts] [bg] `$msg"
-}
-try {
-    Set-Location '$ProxyDir'
-    Log "Background: working dir = `$(Get-Location)"
-    if (-not (Test-Path 'venv\Scripts\python.exe')) {
-        Log "Creating venv..."
-        python -m venv venv 2>&1 | Out-Null
-        if (-not (Test-Path 'venv\Scripts\python.exe')) {
-            Log "ERROR: venv creation failed!"
-            exit 1
-        }
-        Log "Installing requirements..."
-        & .\venv\Scripts\pip.exe install -q -r requirements.txt 2>&1 | Out-Null
-        Log "Requirements installed"
-    }
-    Log "Starting proxy server..."
-    `$proc = Start-Process -FilePath '.\venv\Scripts\python.exe' -ArgumentList 'server.py' ``
-        -RedirectStandardOutput '$ProxyLog' -RedirectStandardError '$ProxyLog.err' ``
-        -WindowStyle Hidden -PassThru
-    `$proc.Id | Out-File -FilePath '$PidFile' -NoNewline
-    Log "Proxy started with PID `$(`$proc.Id)"
-} catch {
-    Log "ERROR: `$(`$_.Exception.Message)"
-}
-"@
-
-Log "Launching background setup..."
-Start-Process -FilePath "powershell" -ArgumentList "-ExecutionPolicy", "Bypass", "-Command", $setupScript -WindowStyle Hidden
-Log "Background setup launched, hook exiting"
+# Start proxy directly with system python — no venv needed
+Log "Starting proxy..."
+$proc = Start-Process -FilePath "python" -ArgumentList "server.py" `
+    -WorkingDirectory $ProxyDir `
+    -RedirectStandardOutput $ProxyLog -RedirectStandardError "$ProxyLog.err" `
+    -WindowStyle Hidden -PassThru
+$proc.Id | Out-File -FilePath $PidFile -NoNewline
+Log "Proxy started with PID $($proc.Id)"
 
 exit 0

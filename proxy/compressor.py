@@ -3,21 +3,22 @@ Rolling Context Compressor
 
 When context exceeds trigger_tokens, compresses old messages down to target_tokens
 of recent context + a dense chronological summary of everything before.
-The summary merges with any existing rolling summary from previous compressions.
+
+Pure stdlib — no external dependencies.
 """
 
 import json
 import os
+import ssl
 import logging
-
-import aiohttp
+from urllib.request import Request, urlopen
 
 log = logging.getLogger("rolling-context.compressor")
 
 SUMMARIZER_BASE_URL = os.environ.get("ROLLING_CONTEXT_SUMMARIZER_URL", "https://api.anthropic.com")
-
-# Aim for ~25% compression ratio: summary ≈ 1/4 of input tokens
 SUMMARY_RATIO = float(os.environ.get("ROLLING_CONTEXT_SUMMARY_RATIO", "0.25"))
+
+ssl_ctx = ssl.create_default_context()
 
 SUMMARY_MARKER = "[ROLLING_CONTEXT_SUMMARY]"
 SUMMARY_END_MARKER = "[/ROLLING_CONTEXT_SUMMARY]"
@@ -72,7 +73,6 @@ class RollingCompressor:
         self.total_tokens_saved = 0
 
     def estimate_tokens(self, messages: list) -> int:
-        """Rough token estimation: ~4 chars per token for English text."""
         total_chars = 0
         for msg in messages:
             content = msg.get("content", "")
@@ -96,30 +96,22 @@ class RollingCompressor:
         return total_chars // 4
 
     def _find_keep_index(self, messages: list) -> int:
-        """Walk backwards from end, keeping messages until we hit target_tokens.
-        Snaps to user message boundaries, ensuring tool_use/tool_result pairs
-        are never split. Always keeps at least the last 4 messages."""
         if len(messages) <= 4:
             return 0
-        max_idx = len(messages) - 4  # Never return higher than this
+        max_idx = len(messages) - 4
         accumulated = 0
         for i in range(len(messages) - 1, -1, -1):
             msg_tokens = self.estimate_tokens([messages[i]])
             if accumulated + msg_tokens > self.target_tokens:
-                # Find a safe boundary: a user message that doesn't start
-                # with a tool_result (which would need the preceding tool_use)
                 for j in range(i + 1, len(messages)):
                     if messages[j].get("role") == "user":
                         if not self._has_tool_result(messages[j]):
                             return min(j, max_idx)
-                        # This user message has tool_result — skip it,
-                        # keep looking for a clean boundary
                 return min(i + 1, max_idx)
             accumulated += msg_tokens
         return 0
 
     def _has_tool_result(self, message: dict) -> bool:
-        """Check if a message contains tool_result blocks."""
         content = message.get("content", "")
         if isinstance(content, list):
             for block in content:
@@ -147,7 +139,6 @@ class RollingCompressor:
         return ""
 
     def _messages_to_text(self, messages: list) -> str:
-        """Convert messages to plain text for summarization."""
         parts = []
         for msg in messages:
             role = msg.get("role", "unknown")
@@ -178,22 +169,13 @@ class RollingCompressor:
             else:
                 text = str(content)
 
-            # Truncate very long individual messages but keep more than before
             if len(text) > 4000:
                 text = text[:3000] + "\n...[truncated]...\n" + text[-1000:]
-
             parts.append(f"**{role}**: {text}")
         return "\n\n".join(parts)
 
-    async def compress(self, messages: list, auth_headers: dict) -> list:
-        """
-        Compress messages using rolling summarization.
-
-        1. Walk backwards from end to find target_tokens worth of recent messages
-        2. Everything before that (including any existing summary) = input for Haiku
-        3. Haiku produces a new merged chronological summary
-        4. Return: [summary, ack] + recent messages
-        """
+    def compress(self, messages: list, auth_headers: dict) -> list:
+        """Compress messages using rolling summarization (synchronous)."""
         keep_from_idx = self._find_keep_index(messages)
 
         has_existing_summary = self._has_summary(messages)
@@ -213,7 +195,6 @@ class RollingCompressor:
 
         conversation_text = self._messages_to_text(to_compress)
 
-        # Calculate max output tokens: ~25% of input, minimum 2K, maximum 16K
         input_tokens = self.estimate_tokens(to_compress)
         if existing_summary:
             input_tokens += len(existing_summary) // 4
@@ -238,26 +219,26 @@ class RollingCompressor:
             f"with {self.summarizer_model} (max_tokens={summary_max_tokens:,})..."
         )
 
-        # Raw HTTP call with same auth headers as the original request
         req_body = json.dumps({
             "model": self.summarizer_model,
             "max_tokens": summary_max_tokens,
             "messages": [{"role": "user", "content": prompt}],
-        })
-        # Use the exact same headers as the original request — same auth, same everything
+        }).encode()
+
         headers = dict(auth_headers)
         headers["content-length"] = str(len(req_body))
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{SUMMARIZER_BASE_URL}/v1/messages?beta=true",
-                data=req_body,
-                headers=headers,
-            ) as resp:
-                if resp.status != 200:
-                    error = await resp.text()
-                    raise RuntimeError(f"Summarization API returned {resp.status}: {error[:500]}")
-                data = await resp.json()
+        req = Request(
+            f"{SUMMARIZER_BASE_URL}/v1/messages?beta=true",
+            data=req_body,
+            headers=headers,
+            method="POST",
+        )
+        with urlopen(req, context=ssl_ctx, timeout=120) as resp:
+            if resp.status != 200:
+                error = resp.read().decode("utf-8", errors="replace")
+                raise RuntimeError(f"Summarization API returned {resp.status}: {error[:500]}")
+            data = json.loads(resp.read())
 
         new_summary = data["content"][0]["text"]
         summary_tokens = len(new_summary) // 4

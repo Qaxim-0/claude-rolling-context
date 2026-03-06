@@ -36,7 +36,7 @@ Run these two commands inside Claude Code:
 /plugin install rolling-context
 ```
 
-Restart your terminal and start a new Claude Code session. On the **first start**, the proxy sets up a Python venv and configures `ANTHROPIC_BASE_URL` — this takes a few seconds, so the first message may fail. Just send it again. From the **second session** onwards, everything works instantly.
+Restart your terminal and start a new Claude Code session. On the **first start**, the plugin configures `ANTHROPIC_BASE_URL` and starts the proxy. Since the env var only takes effect on the next terminal, **restart your terminal once more** — after that, everything works automatically. No pip install needed — pure Python stdlib.
 
 ### Option 2: Manual install
 
@@ -54,7 +54,7 @@ cd $HOME\claude-rolling-context
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-The installer sets up a Python venv, configures `ANTHROPIC_BASE_URL`, and registers the plugin. Restart your terminal and you're done.
+The installer configures `ANTHROPIC_BASE_URL` and registers the plugin. Restart your terminal and you're done. Requires Python 3.7+ (no pip install needed — pure stdlib).
 
 ## Configuration
 
