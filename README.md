@@ -103,7 +103,15 @@ NEXT CYCLE (grows back to 80K, triggers again):
   → keeps msg101-msg140 verbatim
 ```
 
-The summary preserves a chronological timeline of everything that happened — file paths, code changes, decisions, errors, and current state. Dense and technical, not lossy.
+The summary preserves a structured record of everything that happened:
+
+- **Active Goal** — what the user is currently asking for, constraints, do/don't rules
+- **Previous Goals** — completed or shifted-away-from goals (kept brief)
+- **Timeline** — chronological numbered steps: every file change, decision, error, and user instruction
+- **Current State** — what's done, in progress, and next
+- **Key Details** — file paths, configs, decisions that must survive compression
+
+Goals evolve naturally across rolling compressions — the latest request stays prominent while completed goals move to the previous section. User instructions are never lost.
 
 ## Uninstall
 
@@ -132,6 +140,14 @@ curl http://127.0.0.1:5588/health
 ```
 
 Returns compression stats: how many compressions, tokens saved, etc.
+
+## Debug
+
+```bash
+curl http://127.0.0.1:5588/debug/compressions
+```
+
+Returns the stored compression entries with their full summary content — useful for verifying what the rolling summary captured and whether user goals/instructions survived compression.
 
 ## How It's Different from `/compact`
 

@@ -333,6 +333,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         log.info(f"[REQ] GET {self.path}")
         if self.path == "/health":
             self._handle_health()
+        elif self.path == "/debug/compressions":
+            self._handle_debug_compressions()
         else:
             self._proxy_raw("GET")
 
@@ -358,6 +360,28 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         log.info(f"[REQ] OPTIONS {self.path}")
         self._proxy_raw("OPTIONS")
+
+    def _handle_debug_compressions(self):
+        entries = []
+        for i, entry in enumerate(store.compressions):
+            info = {
+                "index": i,
+                "hash_chain_length": len(entry.get("original_hashes") or []),
+                "has_prefix": entry["prefix"] is not None,
+                "prefix_content": None,
+            }
+            if entry["prefix"]:
+                for msg in entry["prefix"]:
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and "[ROLLING_CONTEXT_SUMMARY]" in content:
+                        info["prefix_content"] = content
+            entries.append(info)
+        body = json.dumps(entries, indent=2).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _handle_health(self):
         active = sum(
