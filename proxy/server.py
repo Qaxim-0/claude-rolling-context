@@ -91,19 +91,37 @@ class SessionTracker:
                     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
         return "unknown"
 
+    def _new_session(self):
+        return {
+            "pending": None,
+            "pending_msg_count": 0,
+            "compressed_prefix": None,
+            "compressed_msg_count": 0,
+            "thread": None,
+            "last_input_tokens": 0,
+        }
+
     def get(self, messages: list) -> dict:
         fp = self._fingerprint(messages)
-        log.debug(f"[SESSION] fp={fp} sessions={len(self._sessions)}")
         with self._lock:
-            if fp not in self._sessions:
-                self._sessions[fp] = {
-                    "pending": None,
-                    "pending_msg_count": 0,
-                    "compressed_prefix": None,  # kept and re-injected every request
-                    "compressed_msg_count": 0,   # how many original msgs the prefix replaces
-                    "thread": None,
-                    "last_input_tokens": 0,
-                }
+            if fp in self._sessions:
+                log.debug(f"[SESSION] matched fp={fp} sessions={len(self._sessions)}")
+                return self._sessions[fp]
+
+            # Unknown fingerprint — check if an existing session was compacted
+            # (first message changed). Migrate compression state to new fingerprint.
+            for old_fp, state in list(self._sessions.items()):
+                if state["compressed_prefix"] is not None or state["pending"] is not None:
+                    log.info(
+                        f"[SESSION] Migrating session {old_fp} -> {fp} "
+                        f"(fingerprint changed, likely compaction)"
+                    )
+                    self._sessions[fp] = state
+                    del self._sessions[old_fp]
+                    return state
+
+            log.debug(f"[SESSION] new session fp={fp} sessions={len(self._sessions)}")
+            self._sessions[fp] = self._new_session()
             return self._sessions[fp]
 
     def cleanup_stale(self, max_sessions: int = 50):
@@ -172,7 +190,7 @@ def _do_background_compression(session_state: dict, messages: list, original_msg
         log.info(
             f"[BG] Compression ready: "
             f"~{compressor.estimate_tokens(compressed):,} tokens "
-            f"({len(compressed)} messages, based on {msg_count} original)"
+            f"({len(compressed)} messages, based on {original_msg_count} original)"
         )
     except Exception as e:
         log.error(f"[BG] Compression failed: {e}", exc_info=True)
