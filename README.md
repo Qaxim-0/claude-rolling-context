@@ -1,23 +1,41 @@
 # Rolling Context for Claude Code
 
+[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org)
+![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-orange.svg)
+
 A transparent proxy that gives Claude Code **rolling context compression** — old messages get automatically summarized while recent messages stay fully verbatim. You never hit the context wall, and you never lose important details.
 
 **Zero config.** Uses your existing Claude Code auth. No API key needed. Just install and forget.
+
+> Claude Code's built-in `/compact` replaces your **entire** conversation with a lossy summary. After a few compactions, you're summarizing a summary of a summary. This plugin only compresses old messages — recent context stays untouched.
+
+## `/compact` vs Rolling Context
+
+| | `/compact` (built-in) | Rolling Context |
+|---|---|---|
+| What gets compressed | Everything | Only old messages |
+| Recent context | Summarized (lossy) | **Kept verbatim** |
+| When it runs | Manual or at threshold | Automatic, background |
+| Latency impact | Blocks until done | Zero — async |
+| After multiple compressions | Summary of summary of summary | Fresh rolling merge each time |
+| Original transcript | Replaced | Preserved (JSONL unchanged) |
 
 ## How It Works
 
 ```
 Claude Code  ──►  Rolling Context Proxy (:5588)  ──►  Anthropic API
                          │
-                         ├─ if API reports > trigger (100K default):
-                         │    1. summarize old messages with Haiku (background, async)
-                         │    2. keep ~40K tokens of recent messages verbatim
-                         │    3. inject compressed context on next request
+                         ├─ context < 100K tokens? pass through unchanged
                          │
-                         └─ never blocks, never adds latency
+                         └─ context > 100K tokens?
+                              1. summarize old messages with Haiku (background, async)
+                              2. keep ~40K tokens of recent messages verbatim
+                              3. inject compressed context on next request
+                              4. never blocks, never adds latency
 ```
 
-Instead of Claude Code's built-in `/compact` (which replaces **everything** with a lossy summary), this plugin:
+Instead of replacing everything, this plugin:
 
 1. **Keeps recent messages untouched** — recent context stays verbatim
 2. **Only compresses when needed** — triggers at 100K (real API token count), compresses old messages, grows naturally until next trigger
@@ -56,35 +74,6 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 
 The installer configures `ANTHROPIC_BASE_URL` and registers the plugin. Restart your terminal and you're done. Requires Python 3.7+ (no pip install needed — pure stdlib).
 
-## Configuration
-
-All settings via environment variables (all optional — defaults work great):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ROLLING_CONTEXT_TRIGGER` | `100000` | Compress when context exceeds this many tokens |
-| `ROLLING_CONTEXT_TARGET` | `40000` | Keep this many tokens of recent messages after compression |
-| `ROLLING_CONTEXT_MODEL` | `claude-haiku-4-5-20251001` | Model used for summarization |
-| `ROLLING_CONTEXT_PORT` | `5588` | Proxy listen port |
-| `ROLLING_CONTEXT_UPSTREAM` | `https://api.anthropic.com` | Upstream API URL (chain to another proxy!) |
-| `ROLLING_CONTEXT_SUMMARIZER_URL` | `https://api.anthropic.com` | Custom endpoint for summarization (e.g. local vLLM) |
-| `ROLLING_CONTEXT_SUMMARIZER_KEY` | *(uses Claude Code auth)* | API key for custom summarizer endpoint |
-
-## Proxy Chaining
-
-Already using another proxy (model router, API gateway, etc.)? Rolling Context auto-detects this and chains through it:
-
-```
-Claude Code  ──►  Rolling Context (:5588)  ──►  Your Proxy  ──►  Anthropic API
-```
-
-If `ANTHROPIC_BASE_URL` is already set when you install, the plugin automatically saves it as `ROLLING_CONTEXT_UPSTREAM` and inserts itself in front. No manual config needed.
-
-You can also set it explicitly:
-```bash
-export ROLLING_CONTEXT_UPSTREAM=http://localhost:8080  # your existing proxy
-```
-
 ## How Compression Works
 
 When the message array exceeds the trigger threshold:
@@ -115,6 +104,65 @@ The summary preserves a structured record of everything that happened:
 
 Goals evolve naturally across rolling compressions — the latest request stays prominent while completed goals move to the previous section. User instructions are never lost.
 
+## Architecture
+
+The proxy is **fully stateless** — no sessions, no databases, no tracking. It works by hashing message content:
+
+1. When a response comes back from the API with a high token count, the proxy compresses the messages and stores the result keyed by content hashes
+2. On the next request, it hashes the incoming messages and checks for a matching compression
+3. If found, it swaps in the compressed version transparently
+
+This means:
+- **Multiple conversations work automatically** — each conversation has unique content, unique hashes, no collision
+- **Subagents and branches just work** — the proxy doesn't care about sessions, only content
+- **No state to corrupt** — restart the proxy anytime, worst case is one extra compression cycle
+- **Claude Code sees nothing different** — the proxy is invisible, JSONL transcripts are unmodified
+
+## Configuration
+
+All settings via environment variables (all optional — defaults work great):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ROLLING_CONTEXT_TRIGGER` | `100000` | Compress when context exceeds this many tokens |
+| `ROLLING_CONTEXT_TARGET` | `40000` | Keep this many tokens of recent messages after compression |
+| `ROLLING_CONTEXT_MODEL` | `claude-haiku-4-5-20251001` | Model used for summarization |
+| `ROLLING_CONTEXT_PORT` | `5588` | Proxy listen port |
+| `ROLLING_CONTEXT_UPSTREAM` | `https://api.anthropic.com` | Upstream API URL (chain to another proxy!) |
+| `ROLLING_CONTEXT_SUMMARIZER_URL` | `https://api.anthropic.com` | Custom endpoint for summarization (e.g. local vLLM) |
+| `ROLLING_CONTEXT_SUMMARIZER_KEY` | *(uses Claude Code auth)* | API key for custom summarizer endpoint |
+
+## Proxy Chaining
+
+Already using another proxy (model router, API gateway, etc.)? Rolling Context auto-detects this and chains through it:
+
+```
+Claude Code  ──►  Rolling Context (:5588)  ──►  Your Proxy  ──►  Anthropic API
+```
+
+If `ANTHROPIC_BASE_URL` is already set when you install, the plugin automatically saves it as `ROLLING_CONTEXT_UPSTREAM` and inserts itself in front. No manual config needed.
+
+You can also set it explicitly:
+```bash
+export ROLLING_CONTEXT_UPSTREAM=http://localhost:8080  # your existing proxy
+```
+
+## Health Check
+
+```bash
+curl http://127.0.0.1:5588/health
+```
+
+Returns compression stats: how many compressions, tokens saved, etc.
+
+## Debug
+
+```bash
+curl http://127.0.0.1:5588/debug/compressions
+```
+
+Returns the stored compression entries with their full summary content — useful for verifying what the rolling summary captured and whether user goals/instructions survived compression.
+
 ## Uninstall
 
 Run the uninstall script — it handles both manual and marketplace installs, stops the proxy, cleans env vars, and removes all plugin registrations.
@@ -134,33 +182,6 @@ If you installed via marketplace and already deleted the repo, you can run it fr
 cd $HOME\.claude\plugins\cache\rolling-context-marketplace\rolling-context\1.0.0
 powershell -ExecutionPolicy Bypass -File uninstall.ps1
 ```
-
-## Health Check
-
-```bash
-curl http://127.0.0.1:5588/health
-```
-
-Returns compression stats: how many compressions, tokens saved, etc.
-
-## Debug
-
-```bash
-curl http://127.0.0.1:5588/debug/compressions
-```
-
-Returns the stored compression entries with their full summary content — useful for verifying what the rolling summary captured and whether user goals/instructions survived compression.
-
-## How It's Different from `/compact`
-
-| | `/compact` (built-in) | Rolling Context |
-|---|---|---|
-| What gets compressed | Everything | Only old messages |
-| Recent context | Summarized | Kept verbatim |
-| When it runs | Manual or at threshold | Automatic, background |
-| Latency impact | Blocks until done | Zero — async |
-| Summary quality | Single pass | Rolling merge, preserves timeline |
-| Original transcript | Replaced | Preserved (JSONL unchanged) |
 
 ## License
 
