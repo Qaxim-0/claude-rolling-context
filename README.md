@@ -27,15 +27,23 @@ Instead of Claude Code's built-in `/compact` (which replaces **everything** with
 
 ## Install
 
+**Linux / macOS:**
 ```bash
 git clone https://github.com/NodeNestor/claude-rolling-context.git ~/claude-rolling-context
 cd ~/claude-rolling-context
 bash install.sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/NodeNestor/claude-rolling-context.git $HOME\claude-rolling-context
+cd $HOME\claude-rolling-context
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
 The installer:
 - Sets up a Python venv with dependencies (just `aiohttp`)
-- Adds `ANTHROPIC_BASE_URL` to your shell profile (points Claude Code at the proxy)
+- Configures `ANTHROPIC_BASE_URL` to route through the proxy
 - Registers as a Claude Code plugin (auto-starts proxy on session start)
 
 Restart your terminal and you're done. The proxy starts automatically when Claude Code launches.
@@ -76,9 +84,14 @@ The summary preserves a chronological timeline of everything that happened — f
 
 ## Uninstall
 
+**Linux / macOS:**
 ```bash
-cd ~/claude-rolling-context
-bash uninstall.sh
+cd ~/claude-rolling-context && bash uninstall.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+cd $HOME\claude-rolling-context; powershell -ExecutionPolicy Bypass -File uninstall.ps1
 ```
 
 ## Health Check
