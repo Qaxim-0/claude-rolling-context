@@ -239,8 +239,11 @@ def _do_background_compression(entry: dict, messages: list, auth_headers: dict, 
     try:
         compressed = compressor.compress(messages, auth_headers, real_token_count=real_token_count)
         # compressed = [summary, ack] + recent_verbatim
-        # The recent messages are kept verbatim in the prefix.
-        # Key = only the messages that were actually summarized away.
+        # Prefix = ONLY [summary, ack] — verbatim messages come from the
+        # original request during injection, so including them in the prefix
+        # would cause duplication.
+        prefix = compressed[:2]
+        # Key = the messages that were summarized away (not the verbatim ones).
         recent_count = len(compressed) - 2  # subtract summary + ack
         summarized = messages[:len(messages) - recent_count]
         # Skip old summary prefix if present
@@ -250,12 +253,13 @@ def _do_background_compression(entry: dict, messages: list, auth_headers: dict, 
             if SUMMARY_MARKER in summarized[0]["content"]:
                 start = 2
         key_hashes = _hash_messages(summarized[start:])
-        entry["pending"] = compressed
+        entry["pending"] = prefix
         entry["pending_hashes"] = key_hashes
         log.info(
             f"[BG] Compression ready: "
-            f"~{compressor.estimate_tokens(compressed):,} tokens "
-            f"({len(compressed)} messages, key={len(key_hashes)} hashes)"
+            f"~{compressor.estimate_tokens(prefix):,} tokens "
+            f"({len(prefix)} prefix messages, key={len(key_hashes)} hashes, "
+            f"summarized {len(summarized) - start} messages)"
         )
     except Exception as e:
         log.error(f"[BG] Compression failed: {e}", exc_info=True)
