@@ -136,9 +136,21 @@ class CompressionStore:
                 if not oh:
                     continue
                 n = len(oh)
-                if n <= len(msg_hashes) and n > best_len and oh == msg_hashes[:n]:
-                    best = entry
-                    best_len = n
+                if n <= len(msg_hashes) and n > best_len:
+                    if oh == msg_hashes[:n]:
+                        best = entry
+                        best_len = n
+                    else:
+                        # Find where hashes diverge for debugging
+                        mismatch_at = -1
+                        for i in range(min(n, len(msg_hashes))):
+                            if oh[i] != msg_hashes[i]:
+                                mismatch_at = i
+                                break
+                        log.warning(
+                            f"[MATCH] Hash mismatch at index {mismatch_at} "
+                            f"(stored {n} hashes, request has {len(msg_hashes)} messages)"
+                        )
             return best, best_len
 
     def add(self) -> dict:
@@ -393,6 +405,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         # Scan: do any stored compressions match this request's messages?
         match, match_len = store.find_match(msg_hashes)
+        injected = False
 
         if match and match["prefix"] is not None:
             # Replace matched messages with compressed prefix
@@ -418,6 +431,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 )
                 payload["messages"] = merged
                 token_count = merged_tokens
+                injected = True
             else:
                 log.info(
                     f"[MSG] Compression no longer helps: "
@@ -510,7 +524,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             conn.close()
 
             # Trigger compression based on REAL token count from API response
-            if total_input > 0 and total_input > TRIGGER_TOKENS:
+            # Skip if we already injected compression on this request
+            if not injected and total_input > 0 and total_input > TRIGGER_TOKENS:
                 msg_estimate = compressor.estimate_tokens(current_messages)
                 already_compressing = any(
                     e["thread"] is not None and e["thread"].is_alive()
