@@ -240,7 +240,7 @@ def _do_background_compression(entry: dict, messages: list, auth_headers: dict):
         log.info(
             f"[BG] Compression ready: "
             f"~{compressor.estimate_tokens(compressed):,} tokens "
-            f"({len(compressed)} messages, key={len(input_hashes)} hashes)"
+            f"({len(compressed)} messages, key={len(key_hashes)} hashes)"
         )
     except Exception as e:
         log.error(f"[BG] Compression failed: {e}", exc_info=True)
