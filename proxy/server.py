@@ -108,19 +108,20 @@ class SessionTracker:
                 log.debug(f"[SESSION] matched fp={fp} sessions={len(self._sessions)}")
                 return self._sessions[fp]
 
-            # Unknown fingerprint — check if an existing session was compacted
-            # (first message changed). Migrate compression state to new fingerprint.
-            for old_fp, state in list(self._sessions.items()):
-                if state["compressed_prefix"] is not None or state["pending"] is not None:
-                    log.info(
-                        f"[SESSION] Migrating session {old_fp} -> {fp} "
-                        f"(fingerprint changed, likely compaction)"
-                    )
-                    self._sessions[fp] = state
-                    del self._sessions[old_fp]
-                    return state
+            # Unknown fingerprint — only migrate if this looks like a real conversation
+            # (not a tiny tool call with 1-3 messages)
+            if len(messages) > 10:
+                for old_fp, state in list(self._sessions.items()):
+                    if state["compressed_prefix"] is not None or state["pending"] is not None:
+                        log.info(
+                            f"[SESSION] Migrating session {old_fp} -> {fp} "
+                            f"(fingerprint changed, {len(messages)} messages)"
+                        )
+                        self._sessions[fp] = state
+                        del self._sessions[old_fp]
+                        return state
 
-            log.debug(f"[SESSION] new session fp={fp} sessions={len(self._sessions)}")
+            log.debug(f"[SESSION] new session fp={fp} msgs={len(messages)} sessions={len(self._sessions)}")
             self._sessions[fp] = self._new_session()
             return self._sessions[fp]
 
