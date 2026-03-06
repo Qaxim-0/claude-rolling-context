@@ -223,13 +223,20 @@ def _validate_tool_pairs(messages: list) -> list:
 
 
 def _do_background_compression(entry: dict, messages: list, auth_headers: dict):
-    """Compress messages and store hashes of the input as the match key."""
-    input_hashes = _hash_messages(messages)
+    """Compress messages. Store hashes of real messages (skip summary prefix) as key."""
     log.info(f"[BG] Starting compression of {len(messages)} messages...")
     try:
         compressed = compressor.compress(messages, auth_headers)
+        # Key = hashes of the real messages (not the summary prefix).
+        # If first message is a rolling summary, skip it and the ack.
+        from compressor import SUMMARY_MARKER
+        start = 0
+        if messages and isinstance(messages[0].get("content", ""), str):
+            if SUMMARY_MARKER in messages[0]["content"]:
+                start = 2  # skip [summary, ack]
+        key_hashes = _hash_messages(messages[start:])
         entry["pending"] = compressed
-        entry["pending_hashes"] = input_hashes
+        entry["pending_hashes"] = key_hashes
         log.info(
             f"[BG] Compression ready: "
             f"~{compressor.estimate_tokens(compressed):,} tokens "
