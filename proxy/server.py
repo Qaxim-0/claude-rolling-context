@@ -115,30 +115,34 @@ def _hash_messages(messages: list) -> list:
 
 
 class CompressionStore:
-    """Content-based compression tracking. No sessions, no fingerprints.
+    """Content-based compression tracking. No sessions, no fingerprints, no keys.
 
-    Recognizes messages by their content hashes. When we compress messages,
-    we store hashes of the originals. On future requests, if we see those
-    same messages, we replace them with the compressed version.
-
-    Keyed by hash of first message — naturally separates conversations.
+    Stores a list of compressions. Each has original_hashes (what was compressed)
+    and prefix (the replacement). On ANY request, scans messages — if the hashes
+    match a stored compression, replaces them with the prefix.
     """
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._entries = {}  # first_msg_hash -> entry
+        self._compressions = []  # list of compression entries
 
-    def get_or_create(self, messages: list) -> dict:
-        if not messages:
-            return self._new_entry()
-        key = _hash_message(messages[0])
+    def find_match(self, msg_hashes: list):
+        """Find a compression whose original_hashes is a prefix of msg_hashes."""
         with self._lock:
-            if key not in self._entries:
-                self._entries[key] = self._new_entry()
-            return self._entries[key]
+            best = None
+            best_len = 0
+            for entry in self._compressions:
+                oh = entry["original_hashes"]
+                if not oh:
+                    continue
+                n = len(oh)
+                if n <= len(msg_hashes) and n > best_len and oh == msg_hashes[:n]:
+                    best = entry
+                    best_len = n
+            return best, best_len
 
-    def _new_entry(self):
-        return {
+    def add(self) -> dict:
+        entry = {
             "original_hashes": [],   # hashes of original messages we replaced
             "prefix": None,          # compressed replacement messages
             "pending": None,         # pending compression result
@@ -146,10 +150,17 @@ class CompressionStore:
             "thread": None,          # background compression thread
             "last_input_tokens": 0,  # API-reported token count
         }
+        with self._lock:
+            self._compressions.append(entry)
+        return entry
+
+    def remove(self, entry: dict):
+        with self._lock:
+            self._compressions = [e for e in self._compressions if e is not entry]
 
     @property
-    def entries(self):
-        return self._entries
+    def compressions(self):
+        return self._compressions
 
 
 store = CompressionStore()
@@ -315,7 +326,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def _handle_health(self):
         active = sum(
-            1 for e in store.entries.values()
+            1 for e in store.compressions
             if e["thread"] is not None and e["thread"].is_alive()
         )
         data = {
@@ -326,7 +337,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "upstream_url": UPSTREAM_URL,
             "compression_count": compressor.compression_count,
             "total_tokens_saved": compressor.total_tokens_saved,
-            "active_conversations": len(store.entries),
+            "stored_compressions": len(store.compressions),
             "active_compressions": active,
         }
         body = json.dumps(data).encode()
@@ -361,83 +372,81 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         # Hash all messages for content-based matching
         msg_hashes = _hash_messages(messages)
-        entry = store.get_or_create(messages)
-
         estimated = compressor.estimate_tokens(messages)
-        token_count = entry["last_input_tokens"] if entry["last_input_tokens"] > 0 else estimated
+        token_count = estimated
 
         log.info(
             f"[MSG] model={model} stream={is_streaming} "
-            f"messages={len(messages)} est_tokens=~{estimated:,} "
-            f"last_input_tokens={entry['last_input_tokens']:,}"
+            f"messages={len(messages)} est_tokens=~{estimated:,}"
         )
 
-        # Promote pending compression
-        if entry["pending"] is not None:
-            entry["prefix"] = entry["pending"]
-            entry["original_hashes"] = entry["pending_hashes"]
-            entry["pending"] = None
-            entry["pending_hashes"] = None
-            log.info(
-                f"[MSG] New compression ready: {len(entry['prefix'])} prefix messages "
-                f"replacing {len(entry['original_hashes'])} original messages"
-            )
-
-        # Content-based injection: if we recognize the messages, replace them
-        if entry["prefix"] is not None and entry["original_hashes"]:
-            oh = entry["original_hashes"]
-
-            if len(oh) <= len(msg_hashes) and oh == msg_hashes[:len(oh)]:
-                # Full match — replace compressed messages with prefix
-                new_messages = messages[len(oh):]
-                merged = entry["prefix"] + new_messages
-                merged = _validate_tool_pairs(merged)
-
-                # Strip cache_control from injected messages
-                for msg in merged:
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, dict):
-                                block.pop("cache_control", None)
-
-                merged_tokens = compressor.estimate_tokens(merged)
-                if merged_tokens < token_count:
-                    log.info(
-                        f"[MSG] Injecting: ~{token_count:,} -> ~{merged_tokens:,} tokens "
-                        f"({len(messages)} -> {len(merged)} messages, "
-                        f"replaced {len(oh)} with {len(entry['prefix'])} prefix "
-                        f"+ {len(new_messages)} new)"
-                    )
-                    payload["messages"] = merged
-                    token_count = merged_tokens
-                else:
-                    log.info(
-                        f"[MSG] Compression no longer helps: "
-                        f"merged={merged_tokens:,} >= current={token_count:,}, clearing"
-                    )
-                    entry["prefix"] = None
-                    entry["original_hashes"] = []
-            else:
-                # Hashes don't match — conversation was compacted or changed
+        # Promote any pending compressions
+        for entry in store.compressions:
+            if entry["pending"] is not None:
+                entry["prefix"] = entry["pending"]
+                entry["original_hashes"] = entry["pending_hashes"]
+                entry["pending"] = None
+                entry["pending_hashes"] = None
                 log.info(
-                    f"[MSG] Content mismatch: stored {len(oh)} hashes, "
-                    f"request has {len(msg_hashes)} messages. Resetting compression."
+                    f"[MSG] Compression promoted: {len(entry['prefix'])} prefix messages "
+                    f"replacing {len(entry['original_hashes'])} originals"
                 )
-                entry["prefix"] = None
-                entry["original_hashes"] = []
 
-        # Trigger background compression
+        # Scan: do any stored compressions match this request's messages?
+        match, match_len = store.find_match(msg_hashes)
+
+        if match and match["prefix"] is not None:
+            # Replace matched messages with compressed prefix
+            new_messages = messages[match_len:]
+            merged = match["prefix"] + new_messages
+            merged = _validate_tool_pairs(merged)
+
+            # Strip cache_control from injected messages
+            for msg in merged:
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict):
+                            block.pop("cache_control", None)
+
+            merged_tokens = compressor.estimate_tokens(merged)
+            if merged_tokens < token_count:
+                log.info(
+                    f"[MSG] Injecting: ~{token_count:,} -> ~{merged_tokens:,} tokens "
+                    f"({len(messages)} -> {len(merged)} messages, "
+                    f"replaced {match_len} with {len(match['prefix'])} prefix "
+                    f"+ {len(new_messages)} new)"
+                )
+                payload["messages"] = merged
+                token_count = merged_tokens
+            else:
+                log.info(
+                    f"[MSG] Compression no longer helps: "
+                    f"merged={merged_tokens:,} >= current={token_count:,}, removing"
+                )
+                store.remove(match)
+                match = None
+
+        # Trigger background compression if needed
         current_messages = payload.get("messages", messages)
         msg_estimate = compressor.estimate_tokens(current_messages)
-        already_compressing = entry["thread"] is not None and entry["thread"].is_alive()
-        trigger_tokens = entry["last_input_tokens"] if entry["last_input_tokens"] > 0 else token_count
 
-        if trigger_tokens > TRIGGER_TOKENS and msg_estimate > TARGET_TOKENS and not already_compressing:
+        # Check if any compression is already running
+        already_compressing = any(
+            e["thread"] is not None and e["thread"].is_alive()
+            for e in store.compressions
+        )
+
+        if estimated > TRIGGER_TOKENS and msg_estimate > TARGET_TOKENS and not already_compressing:
             log.info(
-                f"[MSG] Context at ~{trigger_tokens:,} tokens (trigger: {TRIGGER_TOKENS:,}). "
+                f"[MSG] Context at ~{estimated:,} tokens (trigger: {TRIGGER_TOKENS:,}). "
                 f"Compressing in background..."
             )
+            # Create or reuse entry for this compression
+            if match:
+                entry = match
+            else:
+                entry = store.add()
             t = threading.Thread(
                 target=_do_background_compression,
                 args=(entry, current_messages, msg_hashes, auth_headers),
@@ -447,8 +456,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             entry["thread"] = t
         else:
             log.debug(
-                f"[MSG] No compression needed: trigger_tokens={trigger_tokens:,} "
-                f"trigger={TRIGGER_TOKENS:,} est={msg_estimate:,} compressing={already_compressing}"
+                f"[MSG] No compression needed: est={estimated:,} "
+                f"trigger={TRIGGER_TOKENS:,} msg_est={msg_estimate:,} "
+                f"compressing={already_compressing}"
             )
 
         # Forward request — strip Accept-Encoding so we get plain text SSE
@@ -510,7 +520,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                                 + usage.get("cache_read_input_tokens", 0)
                             )
                             if total_input > 0:
-                                entry["last_input_tokens"] = total_input
+                                if match:
+                                    match["last_input_tokens"] = total_input
                                 log.info(f"[MSG] Input tokens from SSE: {total_input:,}")
                             break
                 except Exception as e:
@@ -525,7 +536,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         + usage.get("cache_read_input_tokens", 0)
                     )
                     if total_input > 0:
-                        entry["last_input_tokens"] = total_input
+                        if match:
+                            match["last_input_tokens"] = total_input
                         log.info(f"[MSG] Input tokens from response: {total_input:,}")
                 except Exception as e:
                     log.warning(f"[MSG] Failed to parse response for tokens: {e}")
