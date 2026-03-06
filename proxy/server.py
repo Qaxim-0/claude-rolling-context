@@ -66,23 +66,28 @@ class SessionTracker:
         self._sessions = {}
         self._lock = threading.Lock()
 
-    def _fingerprint(self, messages: list, system=None) -> str:
-        # Use system prompt as stable session identifier
-        if system:
-            if isinstance(system, list):
-                system = json.dumps(system)
-            return hashlib.sha256(system.encode("utf-8", errors="replace")).hexdigest()[:16]
-        # Fallback: first user message
+    def _extract_text(self, content) -> str:
+        if isinstance(content, str):
+            return content[:300]
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    return block.get("text", "")[:300]
+        return ""
+
+    def _fingerprint(self, messages: list) -> str:
+        # Use first user message text — stable until compression replaces it,
+        # then the summary marker becomes the new stable anchor.
         for msg in messages:
             if msg.get("role") == "user":
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    content = json.dumps(content)
-                return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:16]
+                text = self._extract_text(msg.get("content", ""))
+                if text:
+                    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
         return "unknown"
 
-    def get(self, messages: list, system=None) -> dict:
-        fp = self._fingerprint(messages, system)
+    def get(self, messages: list) -> dict:
+        fp = self._fingerprint(messages)
+        log.debug(f"[SESSION] fingerprint={fp} sessions={len(self._sessions)}")
         with self._lock:
             if fp not in self._sessions:
                 self._sessions[fp] = {
@@ -93,15 +98,16 @@ class SessionTracker:
                 }
             return self._sessions[fp]
 
-    def cleanup_stale(self, max_sessions: int = 50):
+    def cleanup_stale(self):
         with self._lock:
-            if len(self._sessions) > max_sessions:
-                to_remove = [
-                    fp for fp, state in self._sessions.items()
-                    if state["pending"] is None and (state["thread"] is None or not state["thread"].is_alive())
-                ]
-                for fp in to_remove[:len(self._sessions) - max_sessions]:
-                    del self._sessions[fp]
+            to_remove = [
+                fp for fp, s in self._sessions.items()
+                if s["pending"] is None
+                and (s["thread"] is None or not s["thread"].is_alive())
+                and s["last_input_tokens"] == 0
+            ]
+            for fp in to_remove:
+                del self._sessions[fp]
 
 
 tracker = SessionTracker()
@@ -285,6 +291,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         auth_headers = get_passthrough_headers(req_headers)
 
         log.info(f"[MSG] POST {self.path} (body={len(raw_body)} bytes)")
+        log.debug(f"[MSG] Request headers: {list(req_headers.keys())}")
 
         try:
             payload = json.loads(raw_body)
@@ -298,10 +305,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
 
         messages = payload.get("messages", [])
-        system = payload.get("system", None)
         is_streaming = payload.get("stream", False)
         model = payload.get("model", "unknown")
-        session_state = tracker.get(messages, system)
+        session_state = tracker.get(messages)
 
         estimated = compressor.estimate_tokens(messages)
         token_count = session_state["last_input_tokens"] if session_state["last_input_tokens"] > 0 else estimated
