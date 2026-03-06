@@ -15,12 +15,12 @@ Write-Host "=== Uninstalling Rolling Context ==="
 
 # Stop proxy if running
 if (Test-Path $PidFile) {
-    $pid = Get-Content $PidFile
+    $proxyPid = Get-Content $PidFile
     try {
-        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $proc = Get-Process -Id $proxyPid -ErrorAction SilentlyContinue
         if ($proc) {
-            Stop-Process -Id $pid -Force
-            Write-Host "Stopped proxy (PID $pid)"
+            Stop-Process -Id $proxyPid -Force
+            Write-Host "Stopped proxy (PID $proxyPid)"
         }
     } catch {}
     Remove-Item $PidFile -Force
