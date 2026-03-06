@@ -2,33 +2,44 @@
 #
 # Run: powershell -ExecutionPolicy Bypass -File uninstall.ps1
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "SilentlyContinue"
 
 $ClaudeDir = Join-Path $env:USERPROFILE ".claude"
 $PidFile = Join-Path $ClaudeDir "rolling-context-proxy.pid"
-$LogFile = Join-Path $ClaudeDir "rolling-context-proxy.log"
 $PluginLink = Join-Path $ClaudeDir "plugins\rolling-context"
 $MarketplaceCache = Join-Path $ClaudeDir "plugins\cache\rolling-context-marketplace"
 $MarketplaceDir = Join-Path $ClaudeDir "plugins\marketplaces\rolling-context-marketplace"
+$Port = if ($env:ROLLING_CONTEXT_PORT) { $env:ROLLING_CONTEXT_PORT } else { "5588" }
 
 Write-Host "=== Uninstalling Rolling Context ==="
 
-# Stop proxy if running
+# Stop proxy — try PID file first, then find by port
+$stopped = $false
 if (Test-Path $PidFile) {
     $proxyPid = Get-Content $PidFile
-    try {
-        $proc = Get-Process -Id $proxyPid -ErrorAction SilentlyContinue
-        if ($proc) {
-            Stop-Process -Id $proxyPid -Force
-            Write-Host "Stopped proxy (PID $proxyPid)"
-        }
-    } catch {}
+    $proc = Get-Process -Id $proxyPid -ErrorAction SilentlyContinue
+    if ($proc) {
+        Stop-Process -Id $proxyPid -Force
+        Write-Host "Stopped proxy (PID $proxyPid)"
+        $stopped = $true
+    }
     Remove-Item $PidFile -Force
 }
+if (-not $stopped) {
+    $conns = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
+    if ($conns) {
+        $conns | ForEach-Object {
+            Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host "Stopped proxy on port $Port"
+    }
+}
 
-# Remove log files
-Remove-Item $LogFile -Force -ErrorAction SilentlyContinue
-Remove-Item "$LogFile.err" -Force -ErrorAction SilentlyContinue
+# Remove all log files
+Remove-Item (Join-Path $ClaudeDir "rolling-context-proxy.log") -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $ClaudeDir "rolling-context-proxy.log.err") -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $ClaudeDir "rolling-context-debug.log") -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $ClaudeDir "rolling-context-hook.log") -Force -ErrorAction SilentlyContinue
 
 # Remove plugin link (manual install)
 if (Test-Path $PluginLink) {
@@ -73,7 +84,7 @@ if (Test-Path $MarketplacesFile) {
 # Restore ANTHROPIC_BASE_URL — if we chained, restore the upstream; otherwise remove
 $upstream = [Environment]::GetEnvironmentVariable("ROLLING_CONTEXT_UPSTREAM", "User")
 $current = [Environment]::GetEnvironmentVariable("ANTHROPIC_BASE_URL", "User")
-if ($current -and $current -match "127\.0\.0\.1.*5588") {
+if ($current -and $current -match "127\.0\.0\.1.*$Port") {
     if ($upstream) {
         [Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", $upstream, "User")
         [Environment]::SetEnvironmentVariable("ROLLING_CONTEXT_UPSTREAM", $null, "User")
@@ -81,6 +92,13 @@ if ($current -and $current -match "127\.0\.0\.1.*5588") {
     } else {
         [Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", $null, "User")
         Write-Host "Removed ANTHROPIC_BASE_URL"
+    }
+}
+
+# Clean ROLLING_CONTEXT env vars
+foreach ($var in @("ROLLING_CONTEXT_UPSTREAM", "ROLLING_CONTEXT_TRIGGER", "ROLLING_CONTEXT_TARGET", "ROLLING_CONTEXT_MODEL", "ROLLING_CONTEXT_PORT")) {
+    if ([Environment]::GetEnvironmentVariable($var, "User")) {
+        [Environment]::SetEnvironmentVariable($var, $null, "User")
     }
 }
 

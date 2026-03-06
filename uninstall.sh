@@ -8,21 +8,34 @@ PIDFILE="$CLAUDE_DIR/rolling-context-proxy.pid"
 PLUGIN_LINK="$CLAUDE_DIR/plugins/rolling-context"
 MARKETPLACE_CACHE="$CLAUDE_DIR/plugins/cache/rolling-context-marketplace"
 MARKETPLACE_DIR="$CLAUDE_DIR/plugins/marketplaces/rolling-context-marketplace"
+PORT="${ROLLING_CONTEXT_PORT:-5588}"
 
 echo "=== Uninstalling Rolling Context ==="
 
-# Stop proxy if running
+# Stop proxy — try PID file first, then find by port
+STOPPED=false
 if [ -f "$PIDFILE" ]; then
     PID=$(cat "$PIDFILE")
     if kill -0 "$PID" 2>/dev/null; then
         kill "$PID"
         echo "Stopped proxy (PID $PID)"
+        STOPPED=true
     fi
     rm -f "$PIDFILE"
 fi
+if [ "$STOPPED" = false ]; then
+    PROXY_PID=$(lsof -ti:$PORT 2>/dev/null || ss -tlnp "sport = :$PORT" 2>/dev/null | grep -oP 'pid=\K\d+' || true)
+    if [ -n "$PROXY_PID" ]; then
+        kill $PROXY_PID 2>/dev/null || true
+        echo "Stopped proxy on port $PORT"
+    fi
+fi
 
-# Remove log files
-rm -f "$CLAUDE_DIR/rolling-context-proxy.log" "$CLAUDE_DIR/rolling-context-proxy.log.err"
+# Remove all log files
+rm -f "$CLAUDE_DIR/rolling-context-proxy.log"
+rm -f "$CLAUDE_DIR/rolling-context-proxy.log.err"
+rm -f "$CLAUDE_DIR/rolling-context-debug.log"
+rm -f "$CLAUDE_DIR/rolling-context-hook.log"
 
 # Remove plugin link (manual install)
 if [ -L "$PLUGIN_LINK" ] || [ -d "$PLUGIN_LINK" ]; then
@@ -42,11 +55,11 @@ if [ -d "$MARKETPLACE_DIR" ]; then
     echo "Removed marketplace registration"
 fi
 
-# Clean installed_plugins.json (remove our entry)
+# Clean installed_plugins.json
 INSTALLED_FILE="$CLAUDE_DIR/plugins/installed_plugins.json"
 if [ -f "$INSTALLED_FILE" ] && command -v python3 &>/dev/null; then
     python3 -c "
-import json, sys
+import json
 with open('$INSTALLED_FILE') as f:
     data = json.load(f)
 if 'rolling-context@rolling-context-marketplace' in data.get('plugins', {}):
@@ -77,7 +90,7 @@ for profile in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.bash_profile"; do
     if [ -f "$profile" ]; then
         if grep -q "Rolling Context" "$profile" 2>/dev/null; then
             sed -i.bak '/# Rolling Context/d' "$profile"
-            sed -i.bak '/ROLLING_CONTEXT_UPSTREAM/d' "$profile"
+            sed -i.bak '/ROLLING_CONTEXT/d' "$profile"
             sed -i.bak '/ANTHROPIC_BASE_URL.*127.0.0.1.*5588/d' "$profile"
             rm -f "$profile.bak"
             echo "Cleaned $profile"
