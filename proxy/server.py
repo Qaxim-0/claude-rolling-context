@@ -74,10 +74,26 @@ class SessionTracker:
         self._sessions = {}
         self._lock = threading.Lock()
 
-    def get(self, auth_header: str) -> dict:
-        # Use auth token as session key — stable for entire session
-        fp = hashlib.sha256(auth_header.encode("utf-8", errors="replace")).hexdigest()[:16]
-        log.debug(f"[SESSION] key={fp} sessions={len(self._sessions)}")
+    def _extract_text(self, content) -> str:
+        if isinstance(content, str):
+            return content[:300]
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    return block.get("text", "")[:300]
+        return ""
+
+    def _fingerprint(self, messages: list) -> str:
+        for msg in messages:
+            if msg.get("role") == "user":
+                text = self._extract_text(msg.get("content", ""))
+                if text:
+                    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+        return "unknown"
+
+    def get(self, messages: list) -> dict:
+        fp = self._fingerprint(messages)
+        log.debug(f"[SESSION] fp={fp} sessions={len(self._sessions)}")
         with self._lock:
             if fp not in self._sessions:
                 self._sessions[fp] = {
@@ -301,8 +317,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         messages = payload.get("messages", [])
         is_streaming = payload.get("stream", False)
         model = payload.get("model", "unknown")
-        auth = req_headers.get("Authorization", req_headers.get("x-api-key", "unknown"))
-        session_state = tracker.get(auth)
+        session_state = tracker.get(messages)
 
         estimated = compressor.estimate_tokens(messages)
         token_count = session_state["last_input_tokens"] if session_state["last_input_tokens"] > 0 else estimated
@@ -323,6 +338,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 f"[MSG] New compression ready: {len(session_state['compressed_prefix'])} prefix messages "
                 f"replacing first {session_state['compressed_msg_count']} original messages"
             )
+
+        # Safety: if message count dropped (Claude Code /compact or new session), reset
+        if session_state["compressed_prefix"] is not None and len(messages) < session_state["compressed_msg_count"]:
+            log.info(
+                f"[MSG] Message count dropped ({len(messages)} < {session_state['compressed_msg_count']}), "
+                f"resetting compression state"
+            )
+            session_state["compressed_prefix"] = None
+            session_state["compressed_msg_count"] = 0
 
         # Re-inject compressed prefix every request
         if session_state["compressed_prefix"] is not None:
