@@ -13,7 +13,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PLUGIN_DIR/../hooks/on-session-start.ps1\" 2>$null || bash \"$CLAUDE_PLUGIN_DIR/../hooks/on-session-start.sh\"",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PLUGIN_DIR/../hooks/on-session-start.ps1\" 2>/dev/null || bash \"$CLAUDE_PLUGIN_DIR/../hooks/on-session-start.sh\" 2>/dev/null",
             "timeout": 15000
           }
         ]
