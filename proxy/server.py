@@ -188,11 +188,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_response(resp.status)
             resp_headers = resp.getheaders()
             log.debug(f"[RAW] Response headers: {resp_headers}")
+            has_content_length = False
             for key, value in resp_headers:
                 lower = key.lower()
                 if lower in ("connection", "transfer-encoding"):
                     continue
+                if lower == "content-length":
+                    has_content_length = True
                 self.send_header(key, value)
+            if not has_content_length:
+                self.send_header("Connection", "close")
             self.end_headers()
 
             total_bytes = 0
@@ -373,11 +378,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_response(resp.status)
             resp_headers = resp.getheaders()
             log.debug(f"[MSG] Response headers: {resp_headers}")
+            has_content_length = False
             for key, value in resp_headers:
                 lower = key.lower()
                 if lower in ("connection", "transfer-encoding"):
                     continue
+                if lower == "content-length":
+                    has_content_length = True
                 self.send_header(key, value)
+            if not has_content_length:
+                self.send_header("Connection", "close")
             self.end_headers()
 
             log.info(f"[MSG] Streaming response...")
