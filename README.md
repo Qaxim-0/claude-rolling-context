@@ -36,7 +36,7 @@ Run these two commands inside Claude Code:
 /plugin install rolling-context
 ```
 
-Restart your terminal. On the next session, the plugin auto-starts the proxy and configures `ANTHROPIC_BASE_URL` for you. That's it.
+Restart your terminal and start a new Claude Code session. On the **first start**, the proxy sets up a Python venv and configures `ANTHROPIC_BASE_URL` — this takes a few seconds, so the first message may fail. Just send it again. From the **second session** onwards, everything works instantly.
 
 ### Option 2: Manual install
 
