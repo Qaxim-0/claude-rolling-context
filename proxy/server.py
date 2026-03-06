@@ -42,7 +42,7 @@ log = logging.getLogger("rolling-context")
 
 UPSTREAM_URL = os.environ.get("ROLLING_CONTEXT_UPSTREAM", "https://api.anthropic.com")
 LISTEN_PORT = int(os.environ.get("ROLLING_CONTEXT_PORT", "5588"))
-TRIGGER_TOKENS = int(os.environ.get("ROLLING_CONTEXT_TRIGGER", "80000"))
+TRIGGER_TOKENS = int(os.environ.get("ROLLING_CONTEXT_TRIGGER", "100000"))
 TARGET_TOKENS = int(os.environ.get("ROLLING_CONTEXT_TARGET", "40000"))
 SUMMARIZER_MODEL = os.environ.get("ROLLING_CONTEXT_MODEL", "claude-haiku-4-5-20251001")
 

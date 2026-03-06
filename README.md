@@ -9,7 +9,7 @@ A transparent proxy that gives Claude Code **rolling context compression** — o
 ```
 Claude Code  ──►  Rolling Context Proxy (:5588)  ──►  Anthropic API
                          │
-                         ├─ if API reports > trigger (80K default):
+                         ├─ if API reports > trigger (100K default):
                          │    1. summarize old messages with Haiku (background, async)
                          │    2. keep ~40K tokens of recent messages verbatim
                          │    3. inject compressed context on next request
@@ -20,7 +20,7 @@ Claude Code  ──►  Rolling Context Proxy (:5588)  ──►  Anthropic API
 Instead of Claude Code's built-in `/compact` (which replaces **everything** with a lossy summary), this plugin:
 
 1. **Keeps recent messages untouched** — recent context stays verbatim
-2. **Only compresses when needed** — triggers at 80K (real API token count), compresses old messages, grows naturally until next trigger
+2. **Only compresses when needed** — triggers at 100K (real API token count), compresses old messages, grows naturally until next trigger
 3. **Merges summaries** — each compression cycle merges with the previous summary, building a rolling timeline
 4. **Never blocks** — compression runs in the background, applied on the next request
 5. **Full transcripts preserved** — Claude Code still saves everything to JSONL in `~/.claude/projects/`
@@ -62,7 +62,7 @@ All settings via environment variables (all optional — defaults work great):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ROLLING_CONTEXT_TRIGGER` | `80000` | Compress when context exceeds this many tokens |
+| `ROLLING_CONTEXT_TRIGGER` | `100000` | Compress when context exceeds this many tokens |
 | `ROLLING_CONTEXT_TARGET` | `40000` | Keep this many tokens of recent messages after compression |
 | `ROLLING_CONTEXT_MODEL` | `claude-haiku-4-5-20251001` | Model used for summarization |
 | `ROLLING_CONTEXT_PORT` | `5588` | Proxy listen port |
@@ -88,17 +88,17 @@ export ROLLING_CONTEXT_UPSTREAM=http://localhost:8080  # your existing proxy
 When the message array exceeds the trigger threshold:
 
 ```
-BEFORE (hit 80K trigger):
+BEFORE (hit 100K trigger):
   [msg1] [msg2] [msg3] ... [msg60] [msg61] ... [msg100]
-  |<——————————————— ~85K tokens ———————————————>|
+  |<——————————————— ~105K tokens ——————————————>|
 
 AFTER (compressed):
   [rolling summary] [ack] [msg61] ... [msg100]
   |<— ~5K summary —>|    |<—— verbatim ————————>|
 
-NEXT CYCLE (grows back to 80K, triggers again):
+NEXT CYCLE (grows back to 100K, triggers again):
   [rolling summary] [ack] [msg61] ... [msg140]
-  |<——————————————— ~85K tokens ———————————————>|
+  |<——————————————— ~105K tokens ——————————————>|
   → new summary merges old summary + msg61-msg100
   → keeps msg101-msg140 verbatim
 ```
