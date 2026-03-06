@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 log = logging.getLogger("rolling-context.compressor")
 
 SUMMARIZER_BASE_URL = os.environ.get("ROLLING_CONTEXT_SUMMARIZER_URL", "https://api.anthropic.com")
+SUMMARIZER_API_KEY = os.environ.get("ROLLING_CONTEXT_SUMMARIZER_KEY", "")
 ssl_ctx = ssl.create_default_context()
 
 SUMMARY_MARKER = "[ROLLING_CONTEXT_SUMMARY]"
@@ -243,7 +244,14 @@ class RollingCompressor:
             "messages": [{"role": "user", "content": prompt}],
         }).encode()
 
-        headers = dict(auth_headers)
+        if SUMMARIZER_API_KEY:
+            headers = {
+                "content-type": "application/json",
+                "anthropic-version": "2023-06-01",
+                "x-api-key": SUMMARIZER_API_KEY,
+            }
+        else:
+            headers = dict(auth_headers)
         headers["content-length"] = str(len(req_body))
         headers["accept-encoding"] = "identity"
 

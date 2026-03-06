@@ -67,6 +67,8 @@ All settings via environment variables (all optional — defaults work great):
 | `ROLLING_CONTEXT_MODEL` | `claude-haiku-4-5-20251001` | Model used for summarization |
 | `ROLLING_CONTEXT_PORT` | `5588` | Proxy listen port |
 | `ROLLING_CONTEXT_UPSTREAM` | `https://api.anthropic.com` | Upstream API URL (chain to another proxy!) |
+| `ROLLING_CONTEXT_SUMMARIZER_URL` | `https://api.anthropic.com` | Custom endpoint for summarization (e.g. local vLLM) |
+| `ROLLING_CONTEXT_SUMMARIZER_KEY` | *(uses Claude Code auth)* | API key for custom summarizer endpoint |
 
 ## Proxy Chaining
 
