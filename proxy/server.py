@@ -21,10 +21,18 @@ from urllib.parse import urlparse
 
 from compressor import RollingCompressor
 
+class FlushFileHandler(logging.FileHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+_log_path = os.path.join(os.path.expanduser("~"), ".claude", "rolling-context-debug.log")
+_log_handler = FlushFileHandler(_log_path, mode="a")
+_log_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[logging.StreamHandler(sys.stdout), _log_handler],
 )
 log = logging.getLogger("rolling-context")
 
@@ -98,26 +106,28 @@ class SessionTracker:
                 }
             return self._sessions[fp]
 
-    def cleanup_stale(self):
+    def cleanup_stale(self, max_sessions: int = 50):
         with self._lock:
-            to_remove = [
-                fp for fp, s in self._sessions.items()
-                if s["pending"] is None
-                and (s["thread"] is None or not s["thread"].is_alive())
-                and s["last_input_tokens"] == 0
-            ]
-            for fp in to_remove:
-                del self._sessions[fp]
+            if len(self._sessions) > max_sessions:
+                to_remove = [
+                    fp for fp, s in self._sessions.items()
+                    if s["pending"] is None
+                    and (s["thread"] is None or not s["thread"].is_alive())
+                ]
+                for fp in to_remove[:len(self._sessions) - max_sessions]:
+                    del self._sessions[fp]
 
 
 tracker = SessionTracker()
 
 
-def _forward_headers(req_headers: dict, body: bytes = None) -> dict:
+def _forward_headers(req_headers: dict, body: bytes = None, strip_encoding: bool = False) -> dict:
     headers = {}
     for key, value in req_headers.items():
         lower = key.lower()
         if lower in ("host", "transfer-encoding", "connection", "content-length"):
+            continue
+        if strip_encoding and lower == "accept-encoding":
             continue
         headers[key] = value
     if body is not None:
@@ -373,9 +383,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 f"trigger={TRIGGER_TOKENS:,} est={msg_estimate:,} compressing={already_compressing}"
             )
 
-        # Forward request using http.client for true streaming
+        # Forward request — strip Accept-Encoding so we get plain text SSE
+        # (needed to parse token counts from response)
         body = json.dumps(payload).encode()
-        headers = _forward_headers(req_headers, body)
+        headers = _forward_headers(req_headers, body, strip_encoding=True)
 
         tracker.cleanup_stale()
 
