@@ -143,13 +143,24 @@ class CompressionStore:
                     continue
                 # Search for the hash chain in msg_hashes
                 chain_len = len(oh)
+                found = False
                 for start in range(len(msg_hashes) - chain_len + 1):
                     if msg_hashes[start:start + chain_len] == oh:
                         end = start + chain_len
                         if end > best_end:
                             best = entry
                             best_end = end
-                        break  # first occurrence of this chain is enough
+                        found = True
+                        break
+                if not found and chain_len <= len(msg_hashes):
+                    # Find first mismatch at position 0 for debugging
+                    for i in range(min(chain_len, len(msg_hashes))):
+                        if oh[i] != msg_hashes[i]:
+                            log.warning(
+                                f"[MATCH] No match: chain={chain_len} req={len(msg_hashes)} "
+                                f"first mismatch at {i}: stored={oh[i]} got={msg_hashes[i]}"
+                            )
+                            break
             return best, best_end
 
     def add(self) -> dict:
@@ -223,18 +234,22 @@ def _validate_tool_pairs(messages: list) -> list:
 
 
 def _do_background_compression(entry: dict, messages: list, auth_headers: dict):
-    """Compress messages. Store hashes of real messages (skip summary prefix) as key."""
+    """Compress messages. Key = hashes of messages that were summarized (not kept verbatim)."""
     log.info(f"[BG] Starting compression of {len(messages)} messages...")
     try:
         compressed = compressor.compress(messages, auth_headers)
-        # Key = hashes of the real messages (not the summary prefix).
-        # If first message is a rolling summary, skip it and the ack.
+        # compressed = [summary, ack] + recent_verbatim
+        # The recent messages are kept verbatim in the prefix.
+        # Key = only the messages that were actually summarized away.
+        recent_count = len(compressed) - 2  # subtract summary + ack
+        summarized = messages[:len(messages) - recent_count]
+        # Skip old summary prefix if present
         from compressor import SUMMARY_MARKER
         start = 0
-        if messages and isinstance(messages[0].get("content", ""), str):
-            if SUMMARY_MARKER in messages[0]["content"]:
-                start = 2  # skip [summary, ack]
-        key_hashes = _hash_messages(messages[start:])
+        if summarized and isinstance(summarized[0].get("content", ""), str):
+            if SUMMARY_MARKER in summarized[0]["content"]:
+                start = 2
+        key_hashes = _hash_messages(summarized[start:])
         entry["pending"] = compressed
         entry["pending_hashes"] = key_hashes
         log.info(
