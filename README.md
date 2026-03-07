@@ -50,7 +50,7 @@ Instead of replacing everything, this plugin:
 Run these two commands inside Claude Code:
 
 ```
-/plugin marketplace add https://github.com/NodeNestor/claude-rolling-context
+/plugin marketplace add https://github.com/NodeNestor/nestor-plugins
 /plugin install rolling-context
 ```
 
