@@ -93,9 +93,29 @@ case "$RESULT" in
 esac
 
 # Check if proxy is already running
+_kill_pid() {
+    local pid="$1"
+    if [ "$IS_WINDOWS" = true ]; then
+        powershell.exe -Command "Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue" 2>/dev/null
+    else
+        kill "$pid" 2>/dev/null
+        sleep 1
+        kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+    fi
+}
+
+_pid_alive() {
+    local pid="$1"
+    if [ "$IS_WINDOWS" = true ]; then
+        powershell.exe -Command "if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" 2>/dev/null
+    else
+        kill -0 "$pid" 2>/dev/null
+    fi
+}
+
 if [ -f "$PIDFILE" ]; then
     PID=$(cat "$PIDFILE")
-    if kill -0 "$PID" 2>/dev/null; then
+    if _pid_alive "$PID"; then
         # Check if version changed — restart if so
         RUNNING_VERSION=$(cat "$VERFILE" 2>/dev/null)
         if [ "$CURRENT_VERSION" = "$RUNNING_VERSION" ]; then
@@ -103,9 +123,7 @@ if [ -f "$PIDFILE" ]; then
             exit 0
         fi
         log "Version changed ($RUNNING_VERSION -> $CURRENT_VERSION), restarting proxy (PID $PID)"
-        kill "$PID" 2>/dev/null
-        sleep 1
-        kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null
+        _kill_pid "$PID"
     fi
     rm -f "$PIDFILE" "$VERFILE"
 fi
