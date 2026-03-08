@@ -600,7 +600,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
             conn.close()
 
-            # Trigger compression based on REAL token count from API response
+            # Fallback: estimate tokens from chars if SSE didn't provide usage
+            if total_input == 0 and msg_chars > 0:
+                total_input = msg_chars // 4  # rough chars-to-tokens estimate
+                log.info(
+                    f"[MSG] No tokens from SSE, estimating from chars: "
+                    f"{msg_chars:,} chars -> ~{total_input:,} tokens"
+                )
+
+            # Trigger compression based on token count
             if total_input > 0 and total_input > TRIGGER_TOKENS:
                 already_compressing = any(
                     e["thread"] is not None and e["thread"].is_alive()
