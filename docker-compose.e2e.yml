@@ -1,0 +1,14 @@
+services:
+  e2e-test:
+    build:
+      context: .
+      dockerfile: test/Dockerfile.e2e
+    environment:
+      - ROLLING_CONTEXT_PORT=5588
+      - ROLLING_CONTEXT_UPSTREAM=https://api.anthropic.com
+      - ROLLING_CONTEXT_TRIGGER=100000
+      - ROLLING_CONTEXT_TARGET=40000
+      - ROLLING_CONTEXT_MODEL=claude-haiku-4-5-20251001
+    volumes:
+      # Mount credentials file, copy to writable location at runtime
+      - ${USERPROFILE}/.claude/.credentials.json:/tmp/credentials.json:ro

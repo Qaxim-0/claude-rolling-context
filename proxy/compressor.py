@@ -11,7 +11,8 @@ import json
 import os
 import ssl
 import logging
-from urllib.request import Request, urlopen
+import http.client
+from urllib.parse import urlparse
 
 log = logging.getLogger("rolling-context.compressor")
 
@@ -19,6 +20,42 @@ _default_summarizer_url = os.environ.get("ROLLING_CONTEXT_UPSTREAM") or "https:/
 SUMMARIZER_BASE_URL = os.environ.get("ROLLING_CONTEXT_SUMMARIZER_URL") or _default_summarizer_url
 SUMMARIZER_API_KEY = os.environ.get("ROLLING_CONTEXT_SUMMARIZER_KEY") or ""
 ssl_ctx = ssl.create_default_context()
+
+_parsed_summarizer = urlparse(SUMMARIZER_BASE_URL)
+_SUMMARIZER_HOST = _parsed_summarizer.hostname
+_SUMMARIZER_PORT = _parsed_summarizer.port
+_SUMMARIZER_SCHEME = _parsed_summarizer.scheme
+_SUMMARIZER_PATH = _parsed_summarizer.path or ""
+
+
+def _summarizer_conn():
+    """Create a connection to the summarizer server (same style as server.py)."""
+    if _SUMMARIZER_SCHEME == "https":
+        return http.client.HTTPSConnection(
+            _SUMMARIZER_HOST,
+            _SUMMARIZER_PORT or 443,
+            context=ssl_ctx,
+            timeout=120,
+        )
+    else:
+        return http.client.HTTPConnection(
+            _SUMMARIZER_HOST,
+            _SUMMARIZER_PORT or 80,
+            timeout=120,
+        )
+
+
+def _join_path(upstream_path: str, request_path: str) -> str:
+    """Join upstream path with request path, handling edge cases."""
+    if not upstream_path:
+        return request_path
+    if not request_path or request_path == "/":
+        return upstream_path
+    if upstream_path.endswith("/") and request_path.startswith("/"):
+        return upstream_path[:-1] + request_path
+    if not upstream_path.endswith("/") and not request_path.startswith("/"):
+        return upstream_path + "/" + request_path
+    return upstream_path + request_path
 
 SUMMARY_MARKER = "[ROLLING_CONTEXT_SUMMARY]"
 SUMMARY_END_MARKER = "[/ROLLING_CONTEXT_SUMMARY]"
@@ -256,17 +293,19 @@ class RollingCompressor:
         headers["content-length"] = str(len(req_body))
         headers["accept-encoding"] = "identity"
 
-        req = Request(
-            f"{SUMMARIZER_BASE_URL}/v1/messages?beta=true",
-            data=req_body,
-            headers=headers,
-            method="POST",
-        )
-        with urlopen(req, context=ssl_ctx, timeout=120) as resp:
-            if resp.status != 200:
-                error = resp.read().decode("utf-8", errors="replace")
-                raise RuntimeError(f"Summarization API returned {resp.status}: {error[:500]}")
-            data = json.loads(resp.read())
+        summarizer_path = _join_path(_SUMMARIZER_PATH, "/v1/messages")
+        log.info(f"Compression request -> {SUMMARIZER_BASE_URL} path={summarizer_path}")
+
+        conn = _summarizer_conn()
+        conn.request("POST", summarizer_path, body=req_body, headers=headers)
+        resp = conn.getresponse()
+        resp_body = resp.read()
+        conn.close()
+
+        if resp.status != 200:
+            error = resp_body.decode("utf-8", errors="replace")
+            raise RuntimeError(f"Summarization API returned {resp.status}: {error[:500]}")
+        data = json.loads(resp_body)
 
         new_summary = data["content"][0]["text"]
         log.info(f"Summary generated: {len(new_summary):,} chars")
